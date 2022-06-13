@@ -2,6 +2,8 @@
 using System.IO;
 using System.Net;
 using System.Windows.Forms;
+using HtmlAgilityPack;
+using HtmlDocument = HtmlAgilityPack.HtmlDocument;
 
 namespace GetContent
 {
@@ -38,7 +40,12 @@ namespace GetContent
 
                 WebHeaderCollection webHeaderCollection = new WebHeaderCollection();
                 var responseBody = HttpGet($"http://www.mrobao.com/main.php?m=product&s=admin_sellorder&key={txtKey.Text.Trim()}&buy_catid=&is_invoice=", cookieContainer, webHeaderCollection);
-                txtRes.Text = responseBody;
+
+                var doc = new HtmlDocument();
+                doc.LoadHtml(responseBody);
+                HtmlNode headNode = doc.DocumentNode.SelectSingleNode("/html/body/div[6]/div[2]/div[2]/div/table/tfoot/tr/td/div[2]");
+                string Title = headNode.InnerText;
+                txtRes.Text = Title;
             }
             catch (Exception ex)
             {
