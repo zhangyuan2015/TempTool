@@ -37,12 +37,17 @@ namespace GetContent
             CookieContainer cookieContainer = new CookieContainer();
             cookieContainer.Add(cookies);
 
+            WebHeaderCollection webHeaderCollection = new WebHeaderCollection();
+            //webHeaderCollection.Add("Accept-Encoding", "gzip, deflate");
+            webHeaderCollection.Add("Accept-Language", "zh-CN,zh;q=0.9");
+            webHeaderCollection.Add("Upgrade-Insecure-Requests", "1");
+
             button1.Enabled = false;
-            Task.Run(() =>
-            {
-                GetData(1, cookieContainer);
-                button1.Enabled = true;
-            });
+            //Task.Run(() =>
+            //{
+            GetData(1, cookieContainer, webHeaderCollection);
+            button1.Enabled = true;
+            //});
         }
 
         public void Res(string res)
@@ -67,13 +72,13 @@ namespace GetContent
         int pQ = 2;
         int pageSize = 10;
         List<订单> 订单集合 = new List<订单>();
-        public void GetData(int pageIndex, CookieContainer cookieContainer)
+        public void GetData(int pageIndex, CookieContainer cookieContainer, WebHeaderCollection webHeaderCollection)
         {
             try
             {
                 if (pageIndex > totalPage)
                 {
-                    Res($"开始完毕");
+                    Res($"执行完毕");
                     return;
                 }
 
@@ -85,8 +90,12 @@ namespace GetContent
                     pageParam = $"firstRow={firstRow}&totalRows={totalRows}&";
                 }
 
-                WebHeaderCollection webHeaderCollection = new WebHeaderCollection();
                 var responseBody = HttpGet($"http://www.mrobao.com/main.php?{pageParam}m=product&s=admin_sellorder&key={txtKey.Text.Trim()}&buy_catid=&is_invoice=", cookieContainer, webHeaderCollection);
+                if (responseBody.Contains("登录"))
+                {
+                    Res($"Cookie 错误，登录失败");
+                    return;
+                }
                 var doc = new HtmlDocument();
                 doc.LoadHtml(responseBody);
 
@@ -108,7 +117,7 @@ namespace GetContent
                 //订单Node/Tr
                 var orderTrNodes = orderNode.SelectNodes("tbody/tr");
 
-                Res($"当前页订单数 {(orderTrNodes.Count / q)} ");
+                Res($"当前页订单数 {orderTrNodes.Count} ");
 
                 订单 订单 = null;
                 for (int i = 0; i < orderTrNodes.Count; i++)
@@ -125,14 +134,14 @@ namespace GetContent
                         var 订单编号 = orderTrNode.SelectSingleNode("th/span[1]/span").InnerText.Trim();
                         订单.订单编号 = 订单编号;
                         Res($"解析订单 - {订单编号}");
-                        
+
                         var 下单时间 = orderTrNode.SelectSingleNode("th/span[2]/span").InnerText.Trim();
                         订单.下单时间 = 下单时间;
                         Res(下单时间);
                     }
                     else if (i % oQ == 2)
                     {
-                        GetDataDtl(订单, cookieContainer);
+                        GetDataDtl(订单, cookieContainer, webHeaderCollection);
                     }
                     else if (i % oQ == 3)
                     {
@@ -150,7 +159,7 @@ namespace GetContent
                 Thread.Sleep(1000);
 
                 pageIndex++;
-                GetData(pageIndex, cookieContainer);
+                GetData(pageIndex, cookieContainer, webHeaderCollection);
             }
             catch (Exception ex)
             {
@@ -158,14 +167,39 @@ namespace GetContent
             }
         }
 
-        public void GetDataDtl(订单 订单, CookieContainer cookieContainer)
+        public void GetDataDtl(订单 订单, CookieContainer cookieContainer, WebHeaderCollection webHeaderCollection)
         {
             try
             {
-                WebHeaderCollection webHeaderCollection = new WebHeaderCollection();
                 var responseBody = HttpGet($"http://www.mrobao.com/main.php?m=product&s=admin_orderdetail&id={订单.订单编号}", cookieContainer, webHeaderCollection);
                 var doc = new HtmlDocument();
                 doc.LoadHtml(responseBody);
+
+                //订单DtlNode
+                var orderDtlNode = doc.DocumentNode.SelectSingleNode("//div[@class='order-detail']");
+
+                var 收获信息 = orderDtlNode.SelectSingleNode("dl/dd[1]").InnerText.Trim();
+                if (订单.收货信息 == null)
+                    订单.收货信息 = new 收货信息();
+
+                var 收货信息Arr = 收获信息.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                订单.收货信息.收件人 = 收货信息Arr[0];
+                var 收获地址Arr = 收货信息Arr[收货信息Arr.Length - 1].Trim().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+                订单.收货信息.省 = 收获地址Arr[0];
+                订单.收货信息.市 = 收获地址Arr[1];
+                订单.收货信息.区 = 收获地址Arr[2];
+                订单.收货信息.地址 = 收获地址Arr[3];
+                订单.收货信息.联系电话 = new List<string>();
+                for (int i = 1; i < (收货信息Arr.Length - 1); i++)
+                {
+                    订单.收货信息.联系电话.Add(收货信息Arr[i]);
+                }
+
+                var 发票信息 = orderDtlNode.SelectSingleNode("dl/dd[2]").InnerText.Trim();
+                if (订单.发票信息 == null)
+                    订单.发票信息 = new 发票信息();
+
+
             }
             catch (Exception ex)
             {
@@ -188,6 +222,7 @@ namespace GetContent
             req.ContentType = "text/html";
             req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.115 Safari/537.36";
             req.Accept = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9";
+            req.Referer = "http://www.mrobao.com/main.php?m=product&s=admin_sellorder";
 
             WebResponse wr = req.GetResponse();
             Stream respStream = wr.GetResponseStream();
@@ -207,7 +242,7 @@ namespace GetContent
         public string 物流名称 { get; set; }
         public string 物流单号 { get; set; }
 
-        public 收货地址 收货地址 { get; set; }
+        public 收货信息 收货信息 { get; set; }
 
         public 发票信息 发票信息 { get; set; }
 
@@ -216,7 +251,7 @@ namespace GetContent
         public List<订单商品> 订单商品 { get; set; }
     }
 
-    public class 收货地址
+    public class 收货信息
     {
         public string 收件人 { get; set; }
         public List<string> 联系电话 { get; set; }
