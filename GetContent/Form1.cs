@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Forms;
-using HtmlAgilityPack;
 using HtmlDocument = HtmlAgilityPack.HtmlDocument;
 
 namespace GetContent
@@ -17,78 +19,153 @@ namespace GetContent
 
         private void button1_Click(object sender, EventArgs e)
         {
+            var cookieStr = txtCookie.Text;
+            if (string.IsNullOrEmpty(cookieStr))
+            {
+                txtRes.Text = "请填入Cookie";
+                return;
+            }
+            CookieCollection cookies = new CookieCollection();
+            foreach (var cookieItem in cookieStr.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+            {
+                var cookieItemArr = cookieItem.Split(new[] { '=' }, StringSplitOptions.RemoveEmptyEntries);
+                if (cookieItemArr.Length == 1)
+                    cookies.Add(new Cookie(cookieItemArr[0].Trim(), "", "/", "www.mrobao.com"));
+                else if (cookieItemArr.Length == 2)
+                    cookies.Add(new Cookie(cookieItemArr[0].Trim(), cookieItemArr[1].Trim(), "/", "www.mrobao.com"));
+            }
+            CookieContainer cookieContainer = new CookieContainer();
+            cookieContainer.Add(cookies);
+
+            button1.Enabled = false;
+            Task.Run(() =>
+            {
+                GetData(1, cookieContainer);
+                button1.Enabled = true;
+            });
+        }
+
+        public void Res(string res)
+        {
+            txtRes.Text += $"{DateTime.Now.ToShortTimeString()} - {res}{Environment.NewLine}";
+        }
+
+        int? totalPage = null;
+        public void PageCount(int page, int totalPage)
+        {
+            txtPageCount.Text = $"{page} / {totalPage}";
+        }
+
+        int? totalRows = null;
+        int orderCount = 0;
+        public void OrderCount()
+        {
+            txtOrderCount.Text = $"{orderCount} / {totalRows}";
+        }
+
+        int oQ = 4;
+        int pQ = 2;
+        int pageSize = 10;
+        List<订单> 订单集合 = new List<订单>();
+        public void GetData(int pageIndex, CookieContainer cookieContainer)
+        {
             try
             {
-                var cookieStr = txtCookie.Text;
-                if (string.IsNullOrEmpty(cookieStr))
+                if (pageIndex > totalPage)
                 {
-                    txtRes.Text = "请填入Cookie";
+                    Res($"开始完毕");
                     return;
                 }
 
-                CookieCollection cookies = new CookieCollection();
-
-                foreach (var cookieItem in cookieStr.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries))
+                Res($"开始解析第 {pageIndex} 页");
+                string pageParam = "";
+                if (pageIndex > 1)
                 {
-                    var cookieItemArr = cookieItem.Split(new[] { '=' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (cookieItemArr.Length == 1)
-                        cookies.Add(new Cookie(cookieItemArr[0].Trim(), "", "/", "www.mrobao.com"));
-                    else if (cookieItemArr.Length == 2)
-                        cookies.Add(new Cookie(cookieItemArr[0].Trim(), cookieItemArr[1].Trim(), "/", "www.mrobao.com"));
+                    int firstRow = (pageIndex - 1) * pageSize;
+                    pageParam = $"firstRow={firstRow}&totalRows={totalRows}&";
                 }
-                CookieContainer cookieContainer = new CookieContainer();
-                cookieContainer.Add(cookies);
 
                 WebHeaderCollection webHeaderCollection = new WebHeaderCollection();
-                var responseBody = HttpGet($"http://www.mrobao.com/main.php?m=product&s=admin_sellorder&key={txtKey.Text.Trim()}&buy_catid=&is_invoice=", cookieContainer, webHeaderCollection);
-
+                var responseBody = HttpGet($"http://www.mrobao.com/main.php?{pageParam}m=product&s=admin_sellorder&key={txtKey.Text.Trim()}&buy_catid=&is_invoice=", cookieContainer, webHeaderCollection);
                 var doc = new HtmlDocument();
                 doc.LoadHtml(responseBody);
+
+                //总页数
+                var pageNodes = doc.DocumentNode.SelectNodes("//div[@class='pagination']/a");
+                var pageNode = pageNodes[pageNodes.Count - 1/*倒数第二个-1*/- 1/*使用下标-1*/];
+                if (totalPage == null)
+                    totalPage = int.Parse(pageNode.InnerText.Trim('.'));
+                PageCount(pageIndex, totalPage.Value);
+
+                if (totalRows == null)
+                {
+                    var href = pageNode.GetAttributeValue("href", "");
+                    totalRows = int.Parse(href.Split(new[] { '&' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault(a => a.Contains("totalRows")).Split(new[] { '=' }, StringSplitOptions.RemoveEmptyEntries)[1]);
+                }
+
+                //订单Node
                 var orderNode = doc.DocumentNode.SelectSingleNode("//table[@class='table-list-style order']");
-                var orderTrNodes = orderNode.SelectNodes("//tbody/tr");
+                //订单Node/Tr
+                var orderTrNodes = orderNode.SelectNodes("tbody/tr");
 
-                List<订单> 订单集合 = new List<订单>();
+                Res($"当前页订单数 {(orderTrNodes.Count / q)} ");
 
-                int q = 4;
                 订单 订单 = null;
                 for (int i = 0; i < orderTrNodes.Count; i++)
                 {
-
-                    if (i % q == 0)
+                    var orderTrNode = orderTrNodes[i];
+                    if (i % oQ == 0)
                     {
                         订单 = new 订单();
-                        //var a = orderTrNodes[i].InnerText;
+                        orderCount++;
+                        OrderCount();
                     }
-                    else if (i % q == 1)
+                    else if (i % oQ == 1)
                     {
-                        var 订单编号 = orderTrNodes[i].SelectSingleNode("//th/span[1]/span").InnerText.Trim();
-                        var 下单时间 = orderTrNodes[i].SelectSingleNode("//th/span[2]/span").InnerText.Trim();
-
+                        var 订单编号 = orderTrNode.SelectSingleNode("th/span[1]/span").InnerText.Trim();
                         订单.订单编号 = 订单编号;
+                        Res($"解析订单 - {订单编号}");
+                        
+                        var 下单时间 = orderTrNode.SelectSingleNode("th/span[2]/span").InnerText.Trim();
                         订单.下单时间 = 下单时间;
+                        Res(下单时间);
                     }
-                    else if (i % q == 2)
+                    else if (i % oQ == 2)
                     {
-                        var a = orderTrNodes[i].InnerText;
+                        GetDataDtl(订单, cookieContainer);
                     }
-                    else if (i % q == 3)
+                    else if (i % oQ == 3)
                     {
-                        if (orderTrNodes[i].InnerText.Contains("发票号码"))
+                        if (orderTrNode.InnerText.Contains("发票号码"))
                         {
-                            var a = orderTrNodes[i].SelectSingleNode("//td");
-                            var 发票信息 = orderTrNodes[i].SelectSingleNode("//td/p").InnerText.Trim();
+                            var 发票信息 = orderTrNode.SelectSingleNode("td/p").InnerText.Trim();
                             订单.发票信息 = new 发票信息 { 发票号码 = 发票信息 };
+                            Res(发票信息);
                         }
 
                         订单集合.Add(订单);
                     }
                 }
 
-                var totalPage = doc.DocumentNode.SelectSingleNode("//div[@class='pagination']/a[10]").InnerText.Trim('.');
-                txtPageCount.Text = $"1 / {totalPage}";
+                Thread.Sleep(1000);
 
-                //string Title = headNode.InnerText;
-                txtRes.Text = responseBody;
+                pageIndex++;
+                GetData(pageIndex, cookieContainer);
+            }
+            catch (Exception ex)
+            {
+                txtRes.Text = ex.Message;
+            }
+        }
+
+        public void GetDataDtl(订单 订单, CookieContainer cookieContainer)
+        {
+            try
+            {
+                WebHeaderCollection webHeaderCollection = new WebHeaderCollection();
+                var responseBody = HttpGet($"http://www.mrobao.com/main.php?m=product&s=admin_orderdetail&id={订单.订单编号}", cookieContainer, webHeaderCollection);
+                var doc = new HtmlDocument();
+                doc.LoadHtml(responseBody);
             }
             catch (Exception ex)
             {
@@ -171,7 +248,7 @@ namespace GetContent
 
     public class 订单商品
     {
-        public string 商品 { get; set; }
+        public string 商品名称 { get; set; }
         public string 状态 { get; set; }
         public string 单价_元 { get; set; }
         public string 数量 { get; set; }
