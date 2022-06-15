@@ -24,7 +24,14 @@ namespace GetContent
             var cookieStr = txtCookie.Text;
             if (string.IsNullOrEmpty(cookieStr))
             {
-                txtRes.Text = "请填入Cookie";
+                txtRes.Text = "请填入 Cookie";
+                return;
+            }
+
+            string userAgent = txtUserAgent.Text;
+            if (string.IsNullOrEmpty(userAgent))
+            {
+                txtRes.Text = "请填入 UserAgent";
                 return;
             }
 
@@ -50,7 +57,7 @@ namespace GetContent
                     webHeaderCollection.Add("Accept-Language", "zh-CN,zh;q=0.9");
                     webHeaderCollection.Add("Upgrade-Insecure-Requests", "1");
 
-                    GetData(1, cookieContainer, webHeaderCollection);
+                    GetData(1, userAgent, cookieContainer, webHeaderCollection);
 
                     Export(订单集合);
                 }
@@ -84,10 +91,9 @@ namespace GetContent
         }
 
         int oQ = 4;
-        int pQ = 2;
         int pageSize = 10;
         List<订单> 订单集合 = new List<订单>();
-        public void GetData(int pageIndex, CookieContainer cookieContainer, WebHeaderCollection webHeaderCollection)
+        public void GetData(int pageIndex, string userAgent, CookieContainer cookieContainer, WebHeaderCollection webHeaderCollection)
         {
             if (pageIndex > totalPage)
             {
@@ -103,7 +109,7 @@ namespace GetContent
                 pageParam = $"firstRow={firstRow}&totalRows={totalRows}&";
             }
 
-            var responseBody = HttpGet($"http://www.mrobao.com/main.php?{pageParam}m=product&s=admin_sellorder&key={txtKey.Text.Trim()}&buy_catid=&is_invoice=", cookieContainer, webHeaderCollection);
+            var responseBody = HttpGet($"http://www.mrobao.com/main.php?{pageParam}m=product&s=admin_sellorder&key={txtKey.Text.Trim()}&buy_catid=&is_invoice=", userAgent, cookieContainer, webHeaderCollection);
             if (responseBody.Contains("登录"))
             {
                 Res("Cookie 错误，登录失败");
@@ -136,7 +142,7 @@ namespace GetContent
             //订单Node/Tr
             var orderTrNodes = orderNode.SelectNodes("tbody/tr");
 
-            Res($"当前页订单数 {orderTrNodes.Count} ");
+            Res($"当前页订单数 {orderTrNodes.Count / oQ} ");
 
             订单 订单 = null;
             for (int i = 0; i < orderTrNodes.Count; i++)
@@ -152,11 +158,9 @@ namespace GetContent
                 {
                     var 订单编号 = orderTrNode.SelectSingleNode("th/span[1]/span").InnerText.Trim();
                     订单.订单编号 = 订单编号;
-                    Res($"解析订单 - {订单编号}");
-
                     var 下单时间 = orderTrNode.SelectSingleNode("th/span[2]/span").InnerText.Trim();
                     订单.下单时间 = 下单时间;
-                    Res(下单时间);
+                    Res($"解析订单 - {订单编号} - {下单时间}");
                 }
                 else if (i % oQ == 2)
                 {
@@ -179,7 +183,7 @@ namespace GetContent
                         }
                     }
 
-                    GetDataDtl(订单, cookieContainer, webHeaderCollection);
+                    GetDataDtl(订单, userAgent, cookieContainer, webHeaderCollection);
                     订单集合.Add(订单);
                 }
             }
@@ -187,17 +191,17 @@ namespace GetContent
             Thread.Sleep(1000);
 
             pageIndex++;
-            GetData(pageIndex, cookieContainer, webHeaderCollection);
+            GetData(pageIndex, userAgent, cookieContainer, webHeaderCollection);
         }
 
-        public void GetDataDtl(订单 订单, CookieContainer cookieContainer, WebHeaderCollection webHeaderCollection)
+        public void GetDataDtl(订单 订单, string userAgent, CookieContainer cookieContainer, WebHeaderCollection webHeaderCollection)
         {
             try
             {
                 string 订单详情Url = $"http://www.mrobao.com/main.php?m=product&s=admin_orderdetail&id={订单.订单编号}";
                 订单.订单详情Url = 订单详情Url;
 
-                var responseBody = HttpGet(订单详情Url, cookieContainer, webHeaderCollection);
+                var responseBody = HttpGet(订单详情Url, userAgent, cookieContainer, webHeaderCollection);
                 var doc = new HtmlDocument();
                 doc.LoadHtml(responseBody);
 
@@ -298,14 +302,14 @@ namespace GetContent
         /// <param name="url"></param>
         /// <param name="cookie"></param>
         /// <returns></returns>
-        public static string HttpGet(string url, CookieContainer cookies, WebHeaderCollection headers)
+        public static string HttpGet(string url, string userAgent, CookieContainer cookies, WebHeaderCollection headers)
         {
             HttpWebRequest req = (HttpWebRequest)HttpWebRequest.Create(url);
             req.CookieContainer = cookies;
             req.Headers = headers;
             req.Method = "GET";
             req.ContentType = "text/html";
-            req.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/102.0.5005.115 Safari/537.36";
+            req.UserAgent = userAgent;
             req.Accept = "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9";
             req.Referer = "http://www.mrobao.com/main.php?m=product&s=admin_sellorder";
 
@@ -404,10 +408,14 @@ namespace GetContent
                 }
             }
             string path = Directory.GetCurrentDirectory();
-            string name = DateTime.Now.ToString("yyyyMMddHHmmss.xlsx");
+            string name = DateTime.Now.ToString("yyyyMMddHHmmss") + ".xlsx";
             ExportExcel($"{path}\\{name}", tableHeaderList, exportInfoList);
 
-            Res($"导出完成：{path}/{name}");
+            Res($"导出完成：{path}\\{name}");
+
+            System.Diagnostics.ProcessStartInfo psi = new System.Diagnostics.ProcessStartInfo("Explorer.exe");
+            psi.Arguments = $"/e,/select,{path}\\";
+            System.Diagnostics.Process.Start(psi);
         }
 
         public static void ExportExcel<T>(string filePath, List<string> tableHeader, IEnumerable<T> dataList)
