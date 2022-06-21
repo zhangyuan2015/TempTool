@@ -188,7 +188,7 @@ namespace GetContent
                 }
             }
 
-            Thread.Sleep(1000);
+            Thread.Sleep(200);
 
             pageIndex++;
             GetData(pageIndex, userAgent, cookieContainer, webHeaderCollection);
@@ -302,7 +302,7 @@ namespace GetContent
         /// <param name="url"></param>
         /// <param name="cookie"></param>
         /// <returns></returns>
-        public static string HttpGet(string url, string userAgent, CookieContainer cookies, WebHeaderCollection headers)
+        public string HttpGet(string url, string userAgent, CookieContainer cookies, WebHeaderCollection headers)
         {
             HttpWebRequest req = (HttpWebRequest)HttpWebRequest.Create(url);
             req.CookieContainer = cookies;
@@ -317,6 +317,14 @@ namespace GetContent
             Stream respStream = wr.GetResponseStream();
             StreamReader reader = new StreamReader(respStream, System.Text.Encoding.GetEncoding("utf-8"));
             string t = reader.ReadToEnd();
+
+            reader.Dispose();
+            reader.Close();
+
+            respStream.Dispose();
+            respStream.Close();
+
+            wr.Dispose();
             wr.Close();
             return t;
         }
